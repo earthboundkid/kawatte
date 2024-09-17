@@ -72,7 +72,7 @@ func (app *appEnv) ParseArgs(args []string) error {
 	fl.Usage = func() {
 		fmt.Fprintf(fl.Output(), `kawatte - %s
 
-Kawatte recursively walks the file tree and finds and replaces the patterns found in the substitution file.
+Kawatte recursively walks the file tree and finds and replaces the patterns found in a substitution file.
 
 Usage:
 
