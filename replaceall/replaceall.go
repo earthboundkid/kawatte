@@ -72,7 +72,23 @@ func (app *appEnv) ParseArgs(args []string) error {
 	fl.Usage = func() {
 		fmt.Fprintf(fl.Output(), `kawatte - %s
 
-Kawatte recursively walks the file tree and finds and replaces the patterns found in a substitution file.
+Kawatte recursively walks the file tree and finds and replaces the patterns
+found in a substitution file. The substitution file is a CSV file of
+old,new substitutions.
+
+Example:
+
+-- subs.csv --
+a,b
+b,c
+c,a
+-- in.txt --
+abcdef
+
+kawatte -pat subs.csv -match '*.txt'
+
+-- in.txt --
+bcadef
 
 Usage:
 
