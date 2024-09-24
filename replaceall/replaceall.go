@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -24,20 +25,22 @@ func CLI(args []string) error {
 		return err
 	}
 	if err = app.Exec(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		app.errorLevel.Println(err)
 	}
 	return err
 }
 
 type appEnv struct {
-	patFile string
-	dir     string
-	incFile []string
-	exFile  []string
-	incDir  []string
-	exDir   []string
-	dryRun  bool
-	*log.Logger
+	patFile    string
+	dir        string
+	incFile    []string
+	exFile     []string
+	incDir     []string
+	exDir      []string
+	dryRun     bool
+	infoLevel  *log.Logger
+	warnLevel  *log.Logger
+	errorLevel *log.Logger
 }
 
 func (app *appEnv) ParseArgs(args []string) error {
@@ -64,9 +67,11 @@ func (app *appEnv) ParseArgs(args []string) error {
 		return nil
 	})
 
-	app.Logger = log.New(io.Discard, AppName+" ", log.LstdFlags)
+	app.warnLevel = log.New(os.Stderr, AppName+" [WARNING] ", log.LstdFlags|log.Lmsgprefix)
+	app.errorLevel = log.New(os.Stderr, AppName+" [ERROR] ", log.LstdFlags|log.Lmsgprefix)
+	app.infoLevel = log.New(io.Discard, AppName+" [INFO] ", log.LstdFlags|log.Lmsgprefix)
 	flagx.BoolFunc(fl, "verbose", "log debug output", func() error {
-		app.Logger.SetOutput(os.Stderr)
+		app.infoLevel.SetOutput(os.Stderr)
 		return nil
 	})
 	fl.Usage = func() {
@@ -153,7 +158,11 @@ func (app *appEnv) loadSubstitutions() (*strings.Replacer, error) {
 		return nil, fmt.Errorf("reading substitution patterns file %q: %w", app.patFile, err)
 	}
 
-	app.Printf("found %d substitutions", len(records))
+	if len(records) == 0 {
+		app.warnLevel.Print("found no substitutions")
+	} else {
+		app.infoLevel.Printf("found %d substitutions", len(records))
+	}
 
 	replacements := slices.Grow[[]string](nil, len(records)*2)
 	for _, record := range records {
@@ -165,46 +174,46 @@ func (app *appEnv) loadSubstitutions() (*strings.Replacer, error) {
 
 func (app *appEnv) walkDir() []string {
 	var paths []string
-	_ = filepath.Walk(app.dir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.WalkDir(app.dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
-			fmt.Printf("warning: error walking directories: %v\n", err)
+			app.warnLevel.Printf("walking directories: %v", err)
 			return nil
 		}
-		if info.IsDir() {
+		if entry.IsDir() {
 			if path == "." {
 				return nil
 			}
 			for _, glob := range app.exDir {
-				if matched, _ := filepath.Match(glob, info.Name()); matched {
-					app.Printf("exclude dir %q", path)
+				if matched, _ := filepath.Match(glob, entry.Name()); matched {
+					app.infoLevel.Printf("exclude dir %q", path)
 					return filepath.SkipDir
 				}
 			}
 
 			for _, glob := range app.incDir {
-				if matched, _ := filepath.Match(glob, info.Name()); matched {
-					app.Printf("include dir %q", path)
+				if matched, _ := filepath.Match(glob, entry.Name()); matched {
+					app.infoLevel.Printf("match for dir %q", path)
 					return nil
 				}
 			}
-			app.Printf("no match for dir %q", path)
+			app.infoLevel.Printf("no match for dir %q", path)
 			return filepath.SkipDir
 		}
 		for _, glob := range app.exFile {
-			if matched, _ := filepath.Match(glob, info.Name()); matched {
-				app.Printf("exclude file %q", path)
+			if matched, _ := filepath.Match(glob, entry.Name()); matched {
+				app.infoLevel.Printf("exclude for %q", path)
 				return nil
 			}
 		}
 
 		for _, glob := range app.incFile {
-			if matched, _ := filepath.Match(glob, info.Name()); matched {
-				app.Printf("include file %q", path)
+			if matched, _ := filepath.Match(glob, entry.Name()); matched {
+				app.infoLevel.Printf("match for %q", path)
 				paths = append(paths, path)
 				return nil
 			}
 		}
-		app.Printf("no match for file %q", path)
+		app.infoLevel.Printf("no match for %q", path)
 		return nil
 	})
 	return paths
@@ -226,12 +235,7 @@ func (app *appEnv) processFile(filePath string, replacer *strings.Replacer) erro
 		return nil
 	}
 
-	info, err := os.Stat(filePath)
-	if err != nil {
-		return fmt.Errorf("processFile(%q): stating: %w", filePath, err)
-	}
-
-	err = os.WriteFile(filePath, []byte(newContent), info.Mode())
+	err = os.WriteFile(filePath, []byte(newContent), 0o644)
 	if err != nil {
 		return fmt.Errorf("processFile(%q): writing: %w", filePath, err)
 	}
